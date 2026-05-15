@@ -7,31 +7,23 @@ import { createEvent, getEvents } from "../services/event.service";
 const token = process.env.TELEGRAM_BOT_TOKEN!;
 const port = process.env.PORT || 10000;
 
-/**
- * 1. CONFIGURATION & POLLING
- * Polling only enabled for the Bot Service.
- */
+// Helper to escape special characters for MarkdownV2
+const escapeMarkdown = (text: string) => {
+  return text.replace(/[_*[\]()~`>#+\-=|{}.!]/g, "\\$&");
+};
+
 const shouldPoll = process.env.ENABLE_POLLING === "true";
 const bot = new TelegramBot(token, { polling: shouldPoll });
 
-/**
- * 2. HEALTH CHECK SERVER
- * Only runs on the Bot instance to prevent EADDRINUSE errors in the Worker.
- */
 if (shouldPoll) {
   http
     .createServer((req, res) => {
       res.writeHead(200, { "Content-Type": "text/plain" });
       res.end("Bot Service Online");
     })
-    .listen(port, () => {
-      console.log(`🚀 Bot health check active on port ${port}`);
-    });
+    .listen(port);
 }
 
-/**
- * 3. COMMAND HANDLERS
- */
 if (shouldPoll) {
   // --- /START ---
   bot.onText(/\/start/, async (msg) => {
@@ -45,19 +37,23 @@ if (shouldPoll) {
       create: { id: userId, telegramChatId: chatId.toString() },
     });
 
-    const welcomeMsg = `✅ *Account Connected\\!*
-
-Welcome to your Reminder Assistant\\. Use /help to see how to schedule events in PH time\\.`;
-    bot.sendMessage(chatId, welcomeMsg, { parse_mode: "MarkdownV2" });
+    bot.sendMessage(
+      chatId,
+      escapeMarkdown(
+        "✅ Account Connected!\n\nWelcome to your Reminder Assistant (PH). Use /help to see how to schedule events.",
+      ),
+      { parse_mode: "MarkdownV2" },
+    );
   });
 
   // --- /HELP ---
   bot.onText(/\/help/, async (msg) => {
     const chatId = msg.chat.id;
+    // We use a Template Literal but escape the variables or the whole block
     const helpText = `
-🚀 *Reminder Bot Guide (PH)*
+🚀 *Reminder Bot Guide \(PH\)*
 
-I'll send you notifications 24h, 1h, and 10m before your events\\.
+I'll send you notifications 24h, 1h, and 10m before your events\.
 
 📋 *Commands*
 • /start — Link your account
@@ -68,7 +64,7 @@ I'll send you notifications 24h, 1h, and 10m before your events\\.
 📝 *How to Add an Event*
 Format: \`TYPE | Title | YYYY-MM-DD HH:MM\`
 
-*Example (Tap to copy):*
+*Example \(Tap to copy\):*
 \`/add DEADLINE | Project Launch | 2026-06-15 09:00\`
 
 🔹 *Valid Types:*
@@ -89,29 +85,31 @@ Format: \`TYPE | Title | YYYY-MM-DD HH:MM\`
     try {
       const events = await getEvents(userId);
       if (events.length === 0) {
-        return bot.sendMessage(chatId, "📭 *Your schedule is empty\\!*", {
-          parse_mode: "MarkdownV2",
-        });
+        return bot.sendMessage(
+          chatId,
+          escapeMarkdown("📭 Your schedule is empty!"),
+          { parse_mode: "MarkdownV2" },
+        );
       }
 
       const list = events
         .map((e) => {
-          // Changed to Philippines Locale
           const date = new Date(e.startTime).toLocaleString("en-PH", {
             dateStyle: "medium",
             timeStyle: "short",
           });
           const emoji =
             e.type === "DEADLINE" ? "🚨" : e.type === "MEETING" ? "📅" : "✈️";
-          return `${emoji} *${e.title}*\n   📅 ${date}`;
+          // We escape the title and the date string specifically
+          return `${emoji} *${escapeMarkdown(e.title)}*\n   📅 ${escapeMarkdown(date)}`;
         })
         .join("\n\n");
 
-      bot.sendMessage(chatId, `📋 *Upcoming Events (PH Time):*\n\n${list}`, {
+      bot.sendMessage(chatId, `📋 *Upcoming Events \(PH Time\):*\n\n${list}`, {
         parse_mode: "MarkdownV2",
       });
     } catch (e) {
-      bot.sendMessage(chatId, "❌ Failed to load events\\.");
+      bot.sendMessage(chatId, escapeMarkdown("❌ Failed to load events."));
     }
   });
 
@@ -125,7 +123,7 @@ Format: \`TYPE | Title | YYYY-MM-DD HH:MM\`
     if (parts.length < 3) {
       return bot.sendMessage(
         chatId,
-        "⚠️ *Format Error\\!* Use \`TYPE | Title | YYYY-MM-DD HH:MM\`",
+        escapeMarkdown("⚠️ Format Error! Use TYPE | Title | YYYY-MM-DD HH:MM"),
         { parse_mode: "MarkdownV2" },
       );
     }
@@ -136,26 +134,30 @@ Format: \`TYPE | Title | YYYY-MM-DD HH:MM\`
     if (isNaN(startTime.getTime())) {
       return bot.sendMessage(
         chatId,
-        "❌ *Invalid Date\\!* Use \`YYYY-MM-DD HH:MM\`",
+        escapeMarkdown("❌ Invalid Date! Use YYYY-MM-DD HH:MM"),
         { parse_mode: "MarkdownV2" },
       );
     }
 
     try {
-      await createEvent({
-        title,
-        type: type.toUpperCase(),
-        startTime,
-        userId,
-      });
+      await createEvent({ title, type: type.toUpperCase(), startTime, userId });
 
+      const successDate = startTime.toLocaleString("en-PH", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      });
+      const successMsg = `✅ *Event Scheduled\\!*
+
+📍 *Title:* ${escapeMarkdown(title)}
+🕒 *Time:* ${escapeMarkdown(successDate)}
+🔔 Reminders set\\!`;
+
+      bot.sendMessage(chatId, successMsg, { parse_mode: "MarkdownV2" });
+    } catch (error) {
       bot.sendMessage(
         chatId,
-        `✅ *Event Scheduled\\!*\n\n📍 *Title:* ${title}\n🕒 *Time:* ${startTime.toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" })}\n🔔 Reminders set\\!`,
-        { parse_mode: "MarkdownV2" },
+        escapeMarkdown("❌ Database error: Failed to save event."),
       );
-    } catch (error) {
-      bot.sendMessage(chatId, "❌ Database error: Failed to save event\\.");
     }
   });
 }
