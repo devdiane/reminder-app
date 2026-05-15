@@ -1,36 +1,133 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Event Reminder System
 
-## Getting Started
+A full-stack reminder application built with Next.js, Prisma, PostgreSQL, and Telegram Bot integration. Never miss a deadline or meeting again!
 
-First, run the development server:
+## Features
+
+### Core Features
+
+- **Multi-user Support**: Each user has their own events and reminders
+- **Telegram Reminders**: Get notified via Telegram bot
+- **Scheduled Jobs**: Automated worker processes reminders at scheduled times
+- **Smart Reminders**: 9 reminders per event (3 days, 24 hours, 3 hours, 1 hour, 15 min, at time, + missed alerts)
+- **Event Types**: Deadline, Meeting, Business Trip
+
+### Frontend Features
+
+- Create events via web UI
+- View upcoming events list
+- Delete events
+- Responsive design with clean UI
+
+### Telegram Bot Features
+
+- `/start` - Connect your Telegram account
+- `/add TYPE | Title | YYYY-MM-DD HH:MM` - Create reminder
+- `/events` - List your events
+- `/help` - Show help
+
+## Architecture
+
+```
+src/
+├── app/                    # Next.js pages
+│   ├── api/               # API routes
+│   │   └── event/         # Event endpoints
+│   └── page.tsx           # Homepage
+├── bot/                    # Telegram bot
+│   └── bot.ts
+├── lib/                    # Utilities
+│   ├── prisma.ts          # Prisma client
+│   └── telegram.ts        # Bot instance
+├── services/               # Business logic
+│   ├── event.service.ts  # Event operations
+│   ├── telegram.service.ts
+│   └── jobQueue.service.ts
+└── workers/                # Background workers
+    └── job.worker.ts     # Job processor
+```
+
+## Tech Stack
+
+- **Framework**: Next.js 14 (App Router)
+- **Database**: PostgreSQL with Prisma ORM
+- **Bot**: node-telegram-bot-api
+- **Styling**: Tailwind CSS
+- **Language**: TypeScript
+
+## Setup
+
+### 1. Install Dependencies
+
+```bash
+npm install
+```
+
+### 2. Configure Environment
+
+Create `.env` file:
+
+```env
+DATABASE_URL="postgresql://user:password@localhost:5432/reminderdb"
+TELEGRAM_BOT_TOKEN="your-bot-token-from-botfather"
+```
+
+### 3. Setup Database
+
+```bash
+npx prisma generate
+npx prisma migrate dev
+```
+
+### 4. Run the Application
+
+Start the frontend:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Start the worker (in a separate terminal):
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npx tsx src/workers/job.worker.ts
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Start the bot (in a separate terminal):
 
-## Learn More
+```bash
+npx tsx src/bot/bot.ts
+```
 
-To learn more about Next.js, take a look at the following resources:
+## API Endpoints
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### POST /api/event
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Create a new event.
 
-## Deploy on Vercel
+```json
+{
+  "title": "Project Submission",
+  "type": "DEADLINE",
+  "startTime": "2026-05-20T18:00:00",
+  "userId": "123456789"
+}
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### GET /api/event/list
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+List all events.
+
+### DELETE /api/event?id={eventId}
+
+Delete an event.
+
+## Telegram Bot Commands
+
+### /start
+
+Connect your Telegram account to receive reminders.
+
+### /add
+
+Create a new reminder. Format:

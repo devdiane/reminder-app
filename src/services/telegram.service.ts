@@ -1,5 +1,5 @@
-import { prisma } from "@/lib/prisma";
-import { bot } from "@/lib/telegram";
+import { prisma } from "../lib/prisma";
+import { bot } from "../lib/telegram";
 
 export async function sendTelegramMessage(userId: string, message: string) {
   const user = await prisma.user.findUnique({

@@ -9,15 +9,19 @@ async function processJobs() {
       runAt: { lte: now },
       status: "PENDING",
     },
+    orderBy: {
+      runAt: "asc",
+    },
+    take: 50, // Process max 50 jobs at a time
   });
 
   if (jobs.length === 0) return;
 
+  console.log(`📡 Processing ${jobs.length} jobs...`);
+
   for (const job of jobs) {
     try {
-      console.log("PROCESSING:", job.type);
-
-      const payload = job.payload as any;
+      const payload = job.payload as Record<string, any>;
 
       // mark as processing FIRST to avoid duplicates
       await prisma.job.update({
@@ -27,7 +31,7 @@ async function processJobs() {
 
       switch (job.type) {
         case "REMINDER": {
-          const message = buildReminderMessage(payload);
+          const message = buildReminderMessage(payload, job.type);
           await sendTelegramMessage(payload.userId, message);
           break;
         }
@@ -35,7 +39,7 @@ async function processJobs() {
         case "MISSED_10M":
         case "MISSED_1H":
         case "MISSED_24H": {
-          const message = buildMissedMessage(payload);
+          const message = buildMissedMessage(payload, job.type);
           await sendTelegramMessage(payload.userId, message);
           break;
         }
@@ -55,51 +59,81 @@ async function processJobs() {
   }
 }
 
-function buildReminderMessage(payload: any) {
-  const date = new Date(payload.eventTime).toLocaleString();
+function buildReminderMessage(payload: any, label: string) {
+  const eventDate = new Date(payload.startTime);
+  const dateStr = eventDate.toLocaleDateString();
+  const timeStr = eventDate.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 
-  const hoursLeft = Math.max(
-    0,
-    Math.round((new Date(payload.eventTime).getTime() - Date.now()) / 3600000),
-  );
+  const msLeft = eventDate.getTime() - Date.now();
+  const hoursLeft = Math.max(0, Math.round(msLeft / 3600000));
+  const daysLeft = Math.max(0, Math.round(msLeft / 86400000));
 
-  if (payload.type === "DEADLINE") {
-    return `📌 Reminder: You have a deadline on ${date}.
-⏳ You have ${hoursLeft} hours left before deadline.`;
+  const emoji =
+    payload.type === "DEADLINE"
+      ? "📌"
+      : payload.type === "MEETING"
+        ? "📅"
+        : "✈️";
+  const typeLabel =
+    payload.type === "DEADLINE"
+      ? "deadline"
+      : payload.type === "MEETING"
+        ? "meeting"
+        : "trip";
+
+  // Build time remaining text
+  let timeText = "";
+  if (daysLeft > 0) {
+    timeText = `You have ${daysLeft} day${daysLeft > 1 ? "s" : ""} left`;
+  } else if (hoursLeft > 0) {
+    timeText = `You have ${hoursLeft} hour${hoursLeft > 1 ? "s" : ""} left`;
+  } else {
+    const minutesLeft = Math.max(0, Math.round(msLeft / 60000));
+    timeText = `You have ${minutesLeft} minute${minutesLeft !== 1 ? "s" : ""} left`;
   }
 
-  if (payload.type === "MEETING") {
-    return `📅 Reminder: You have a meeting on ${date}.
-⏳ You have ${hoursLeft} hours left before meeting.`;
-  }
-
-  if (payload.type === "BUSINESS_TRIP") {
-    return `✈️ Reminder: You have a business trip on ${date}.
-⏳ You have ${hoursLeft} hours left before trip.`;
-  }
-
-  return `Reminder: You have an event on ${date}`;
+  return `${emoji} Reminder: You have a ${typeLabel} — ${payload.title}
+📅 ${dateStr} at ${timeStr}
+⏳ ${timeText} before ${typeLabel}.`;
 }
 
-function buildMissedMessage(payload: any) {
-  const date = new Date(payload.eventTime).toLocaleString();
+function buildMissedMessage(payload: any, missType: string) {
+  const eventDate = new Date(payload.startTime);
+  const dateStr = eventDate.toLocaleDateString();
+  const timeStr = eventDate.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 
-  if (payload.type === "DEADLINE") {
-    return `🚨 Urgent Reminder: You missed the deadline for ${payload.title} that ended on ${date}`;
+  const emoji =
+    payload.type === "DEADLINE"
+      ? "🚨"
+      : payload.type === "MEETING"
+        ? "⚠️"
+        : "⚠️";
+  const typeLabel =
+    payload.type === "DEADLINE"
+      ? "deadline"
+      : payload.type === "MEETING"
+        ? "meeting"
+        : "trip";
+
+  if (missType === "MISSED_10M") {
+    return `${emoji} Urgent: Your ${typeLabel} "${payload.title}" was due 10 minutes ago!`;
   }
 
-  if (payload.type === "MEETING") {
-    return `🚨 Urgent Reminder: You missed the meeting on ${date}`;
+  if (missType === "MISSED_1H") {
+    return `${emoji} Missed: You missed your ${typeLabel} "${payload.title}" on ${dateStr} at ${timeStr}.`;
   }
 
-  if (payload.type === "BUSINESS_TRIP") {
-    return `🚨 Urgent Reminder: You missed your business trip on ${date}`;
-  }
-
-  return `🚨 You missed an event scheduled on ${date}`;
+  // MISSED_24H
+  return `${emoji} Notice: The ${typeLabel} "${payload.title}" from ${dateStr} has passed.`;
 }
 
-// run every 5 seconds
-setInterval(processJobs, 5000);
+// run every 10 seconds
+setInterval(processJobs, 10000);
 
 console.log("📡 DB Queue Worker Running...");
