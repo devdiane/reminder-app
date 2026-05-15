@@ -5,17 +5,30 @@ import { sendTelegramMessage } from "../services/telegram.service";
 
 /**
  * 1. RENDER HEALTH CHECK
- * Required to keep the service from being killed on the Free Tier.
+ * We only start this if we are in the worker process to avoid port clashes.
  */
 const port = process.env.PORT || 10000;
-http
-  .createServer((req, res) => {
-    res.writeHead(200, { "Content-Type": "text/plain" });
-    res.end("Worker is active");
-  })
-  .listen(port, () => {
-    console.log(`🚀 Health check server listening on port ${port}`);
-  });
+
+// This starts the server for the Worker service specifically.
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { "Content-Type": "text/plain" });
+  res.end("Worker is active and processing jobs");
+});
+
+server.listen(port, () => {
+  console.log(`🚀 Worker health check server listening on port ${port}`);
+});
+
+// Handle server errors (like port already in use) gracefully
+server.on("error", (e: any) => {
+  if (e.code === "EADDRINUSE") {
+    console.error(`❌ Port ${port} is already in use. Retrying in 5s...`);
+    setTimeout(() => {
+      server.close();
+      server.listen(port);
+    }, 5000);
+  }
+});
 
 /**
  * 2. CORE PROCESSING LOGIC
@@ -23,63 +36,65 @@ http
 async function processJobs() {
   const now = new Date();
 
-  // Fetch pending jobs
-  const jobsToProcess = await prisma.job.findMany({
-    where: {
-      runAt: { lte: now },
-      status: "PENDING",
-    },
-    orderBy: { runAt: "asc" },
-    take: 50,
-  });
+  try {
+    // Fetch pending jobs
+    const jobsToProcess = await prisma.job.findMany({
+      where: {
+        runAt: { lte: now },
+        status: "PENDING",
+      },
+      orderBy: { runAt: "asc" },
+      take: 50,
+    });
 
-  if (jobsToProcess.length === 0) return;
+    if (jobsToProcess.length === 0) return;
 
-  // ATOMIC LOCK: Immediately mark these jobs as DONE (or PROCESSING)
-  // so the next interval (in 10s) doesn't pick up the same records.
-  const jobIds = jobsToProcess.map((j) => j.id);
-  await prisma.job.updateMany({
-    where: { id: { in: jobIds } },
-    data: { status: "DONE" },
-  });
+    const jobIds = jobsToProcess.map((j) => j.id);
 
-  console.log(`📡 Processing ${jobsToProcess.length} jobs...`);
+    // ATOMIC LOCK
+    await prisma.job.updateMany({
+      where: { id: { in: jobIds } },
+      data: { status: "DONE" },
+    });
 
-  for (const job of jobsToProcess) {
-    try {
-      const payload = job.payload as Record<string, any>;
+    console.log(`📡 Processing ${jobsToProcess.length} jobs...`);
 
-      switch (job.type) {
-        case "REMINDER": {
-          const message = buildReminderMessage(payload);
-          await sendTelegramMessage(payload.userId, message);
-          break;
+    for (const job of jobsToProcess) {
+      try {
+        const payload = job.payload as Record<string, any>;
+
+        switch (job.type) {
+          case "REMINDER": {
+            const message = buildReminderMessage(payload);
+            await sendTelegramMessage(payload.userId, message);
+            break;
+          }
+          case "MISSED_10M":
+          case "MISSED_1H":
+          case "MISSED_24H": {
+            const message = buildMissedMessage(payload, job.type);
+            await sendTelegramMessage(payload.userId, message);
+            break;
+          }
+          default:
+            console.warn(`❓ Unknown job type: ${job.type}`);
         }
-
-        case "MISSED_10M":
-        case "MISSED_1H":
-        case "MISSED_24H": {
-          const message = buildMissedMessage(payload, job.type);
-          await sendTelegramMessage(payload.userId, message);
-          break;
-        }
-
-        default:
-          console.warn(`❓ Unknown job type: ${job.type}`);
+      } catch (error) {
+        console.error(`❌ Job ${job.id} failed:`, error);
+        await prisma.job.update({
+          where: { id: job.id },
+          data: { status: "FAILED" },
+        });
       }
-    } catch (error) {
-      console.error(`❌ Job ${job.id} failed:`, error);
-      // Optional: Revert to FAILED if you want to track issues
-      await prisma.job.update({
-        where: { id: job.id },
-        data: { status: "FAILED" },
-      });
     }
+  } catch (err) {
+    console.error("Critical Worker Error:", err);
   }
 }
 
 /**
  * 3. MESSAGE BUILDERS
+ * Use single '*' for bold in Telegram Markdown (Standard mode)
  */
 function buildReminderMessage(payload: any) {
   const eventDate = new Date(payload.startTime);
@@ -111,9 +126,7 @@ function buildReminderMessage(payload: any) {
     timeText = `You have ${minutesLeft} minute${minutesLeft !== 1 ? "s" : ""} left`;
   }
 
-  return `${emoji} **Reminder:** You have a ${typeLabel} — **${payload.title}**
-📅 ${dateStr} at ${timeStr}
-⏳ ${timeText} before ${typeLabel}.`;
+  return `${emoji} *Reminder:* You have a ${typeLabel} — *${payload.title}*\n📅 ${dateStr} at ${timeStr}\n⏳ ${timeText} before ${typeLabel}.`;
 }
 
 function buildMissedMessage(payload: any, missType: string) {
@@ -122,17 +135,16 @@ function buildMissedMessage(payload: any, missType: string) {
     hour: "2-digit",
     minute: "2-digit",
   });
-
   const emoji = payload.type === "DEADLINE" ? "🚨" : "⚠️";
   const typeLabel = payload.type?.toLowerCase() || "event";
 
   if (missType === "MISSED_10M") {
-    return `${emoji} **Urgent:** Your ${typeLabel} "${payload.title}" was due 10 minutes ago!`;
+    return `${emoji} *Urgent:* Your ${typeLabel} "${payload.title}" was due 10 minutes ago!`;
   }
   if (missType === "MISSED_1H") {
-    return `${emoji} **Missed:** You missed your ${typeLabel} "${payload.title}" on ${dateStr} at ${timeStr}.`;
+    return `${emoji} *Missed:* You missed your ${typeLabel} "${payload.title}" on ${dateStr} at ${timeStr}.`;
   }
-  return `${emoji} **Notice:** The ${typeLabel} "${payload.title}" from ${dateStr} has passed.`;
+  return `${emoji} *Notice:* The ${typeLabel} "${payload.title}" from ${dateStr} has passed.`;
 }
 
 /**

@@ -1,9 +1,12 @@
 import { getEvents } from "@/services/event.service";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const events = await getEvents();
+    const searchParams = request.nextUrl.searchParams;
+    const userId = searchParams.get("userId");
+
+    const events = await getEvents(userId || undefined);
 
     return NextResponse.json({ events });
   } catch (error) {
