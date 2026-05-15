@@ -7,6 +7,9 @@ export type EventInput = {
   userId: string;
 };
 
+/**
+ * Creates an event and schedules its corresponding reminder jobs.
+ */
 export async function createEvent(input: EventInput) {
   // 1. Save event to database
   const event = await prisma.event.create({
@@ -18,46 +21,38 @@ export async function createEvent(input: EventInput) {
     },
   });
 
-  // 2. Generate reminder jobs
+  // 2. Generate reminder jobs - passing the actual event.id
   await scheduleReminders({
-    title: input.title,
-    type: input.type,
-    startTime: input.startTime,
-    userId: input.userId,
+    eventId: event.id,
+    ...input,
   });
 
   return event;
 }
 
+/**
+ * Deletes an event and cleans up all associated jobs in the queue.
+ */
 export async function deleteEvent(eventId: string) {
-  // Delete associated jobs first
-  const payload = await prisma.job.findFirst({
+  // Delete associated jobs using the eventId stored in the JSON payload
+  await prisma.job.deleteMany({
     where: {
       payload: {
         path: ["eventId"],
         equals: eventId,
       },
     },
-    select: { payload: true },
   });
 
-  if (payload) {
-    await prisma.job.deleteMany({
-      where: {
-        payload: {
-          path: ["eventId"],
-          equals: eventId,
-        },
-      },
-    });
-  }
-
-  // Delete event
+  // Delete the actual event
   return prisma.event.delete({
     where: { id: eventId },
   });
 }
 
+/**
+ * Fetches events, optionally filtered by user.
+ */
 export async function getEvents(userId?: string) {
   const where = userId ? { userId } : {};
 
@@ -69,69 +64,34 @@ export async function getEvents(userId?: string) {
   });
 }
 
-async function scheduleReminders(data: {
-  title: string;
-  type: string;
-  startTime: Date;
-  userId: string;
-}) {
+/**
+ * Helper to calculate and persist reminder/missed status jobs.
+ */
+async function scheduleReminders(data: EventInput & { eventId: string }) {
   const eventDate = new Date(data.startTime);
+  const now = new Date();
 
   const schedules = [
-    {
-      type: "REMINDER",
-      label: "3 days",
-      runAt: new Date(eventDate.getTime() - 3 * 24 * 60 * 60 * 1000),
-    },
-    {
-      type: "REMINDER",
-      label: "24 hours",
-      runAt: new Date(eventDate.getTime() - 24 * 60 * 60 * 1000),
-    },
-    {
-      type: "REMINDER",
-      label: "3 hours",
-      runAt: new Date(eventDate.getTime() - 3 * 60 * 60 * 1000),
-    },
-    {
-      type: "REMINDER",
-      label: "1 hour",
-      runAt: new Date(eventDate.getTime() - 60 * 60 * 1000),
-    },
-    {
-      type: "REMINDER",
-      label: "15 min",
-      runAt: new Date(eventDate.getTime() - 15 * 60 * 1000),
-    },
-    {
-      type: "REMINDER",
-      label: "now",
-      runAt: eventDate,
-    },
-
-    // missed reminders
-    {
-      type: "MISSED_10M",
-      label: "missed 10m",
-      runAt: new Date(eventDate.getTime() + 10 * 60 * 1000),
-    },
-    {
-      type: "MISSED_1H",
-      label: "missed 1h",
-      runAt: new Date(eventDate.getTime() + 60 * 60 * 1000),
-    },
-    {
-      type: "MISSED_24H",
-      label: "missed 24h",
-      runAt: new Date(eventDate.getTime() + 24 * 60 * 60 * 1000),
-    },
+    { type: "REMINDER", label: "3 days", offset: -3 * 24 * 60 * 60 * 1000 },
+    { type: "REMINDER", label: "24 hours", offset: -24 * 60 * 60 * 1000 },
+    { type: "REMINDER", label: "3 hours", offset: -3 * 60 * 60 * 1000 },
+    { type: "REMINDER", label: "1 hour", offset: -60 * 60 * 1000 },
+    { type: "REMINDER", label: "15 min", offset: -15 * 60 * 1000 },
+    { type: "REMINDER", label: "now", offset: 0 },
+    { type: "MISSED_10M", label: "missed 10m", offset: 10 * 60 * 1000 },
+    { type: "MISSED_1H", label: "missed 1h", offset: 60 * 60 * 1000 },
+    { type: "MISSED_24H", label: "missed 24h", offset: 24 * 60 * 60 * 1000 },
   ];
 
-  // Create jobs only if runAt is in the future (or very recent past within 1 minute for "now" reminder)
-  const now = new Date();
-  const validSchedules = schedules.filter(
-    (job) => job.runAt > now || job.runAt.getTime() > now.getTime() - 60 * 1000,
-  );
+  // Map to runAt dates and filter for future tasks only
+  const validSchedules = schedules
+    .map((s) => ({
+      type: s.type,
+      runAt: new Date(eventDate.getTime() + s.offset),
+    }))
+    .filter(
+      (job) => job.runAt > now || job.runAt.getTime() > now.getTime() - 60000,
+    );
 
   if (validSchedules.length > 0) {
     await prisma.job.createMany({
@@ -139,6 +99,7 @@ async function scheduleReminders(data: {
         type: job.type,
         runAt: job.runAt,
         payload: {
+          eventId: data.eventId, // KEY FIX: Linked to event for deletion
           title: data.title,
           type: data.type,
           startTime: data.startTime,
@@ -148,5 +109,5 @@ async function scheduleReminders(data: {
     });
   }
 
-  return { event, jobCount: validSchedules.length };
+  return { jobCount: validSchedules.length };
 }
