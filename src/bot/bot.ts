@@ -7,15 +7,11 @@ import { createEvent, getEvents } from "../services/event.service";
 const token = process.env.TELEGRAM_BOT_TOKEN!;
 const port = process.env.PORT || 10000;
 
-// 1. DUAL-SERVICE LOGIC
-// shouldPoll is true ONLY for the Bot Service.
-// For the Worker Service, this prevents the '409 Conflict' error.
 const shouldPoll = process.env.ENABLE_POLLING === "true";
 const bot = new TelegramBot(token, { polling: shouldPoll });
 
 /**
- * 2. HEALTH CHECK SERVER
- * Only runs on the main Bot instance to avoid 'EADDRINUSE' (Port 10000) errors.
+ * HEALTH CHECK SERVER (only for polling instance)
  */
 if (shouldPoll) {
   http
@@ -29,10 +25,10 @@ if (shouldPoll) {
 }
 
 /**
- * 3. COMMAND HANDLERS
+ * COMMANDS
  */
 if (shouldPoll) {
-  // /START - Show guide on first interaction
+  // START
   bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from?.id.toString();
@@ -44,54 +40,53 @@ if (shouldPoll) {
       create: { id: userId, telegramChatId: chatId.toString() },
     });
 
-    // Show guide on first interaction
     const guideText = `
-👋 *Welcome to Reminder Bot!*
+👋 <b>Welcome to Reminder Bot!</b>
 
-📋 *Available Commands:*
-
+📋 <b>Available Commands:</b>
 /start - Connect your account
 /add - Create a new reminder
 /events - List your upcoming events
 /help - Show this guide
 
-📝 */add Format:*
-\`/add TYPE | Title | YYYY-MM-DD HH:MM\`
+📝 <b>/add Format:</b>
+<code>/add TYPE | Title | YYYY-MM-DD HH:MM</code>
 
-*Example:*
-\`/add DEADLINE | Project Submission | 2026-05-20 18:00\`
+<b>Example:</b>
+<code>/add DEADLINE | Project Submission | 2026-05-20 18:00</code>
 
-🔹 *Types:* DEADLINE, MEETING, BUSINESS_TRIP
+🔹 <b>Types:</b> DEADLINE, MEETING, BUSINESS_TRIP
 
-💡 *Tip:* Set /add for a time at least 5 minutes in the future to receive reminders!
+💡 Tip: Set reminders at least 5 minutes in the future.
     `.trim();
 
-    bot.sendMessage(chatId, guideText, { parse_mode: "Markdown" });
+    bot.sendMessage(chatId, guideText, { parse_mode: "HTML" });
   });
 
-  // /HELP (ENHANCED PH GUIDE)
+  // HELP
   bot.onText(/\/help/, async (msg) => {
     const chatId = msg.chat.id;
-    const helpText = `
-📋 *Available Commands:*
 
+    const helpText = `
+📋 <b>Available Commands:</b>
 /start - Connect your account
 /add - Create a new reminder
 /events - List your upcoming events
 /help - Show this guide
 
-📝 */add Format:*
-\`/add TYPE | Title | YYYY-MM-DD HH:MM\`
+📝 <b>/add Format:</b>
+<code>/add TYPE | Title | YYYY-MM-DD HH:MM</code>
 
-*Example:*
-\`/add DEADLINE | Project Submission | 2026-05-20 18:00\`
+<b>Example:</b>
+<code>/add DEADLINE | Project Submission | 2026-05-20 18:00</code>
 
-🔹 *Types:* DEADLINE, MEETING, BUSINESS_TRIP
+🔹 <b>Types:</b> DEADLINE, MEETING, BUSINESS_TRIP
     `.trim();
-    bot.sendMessage(chatId, helpText, { parse_mode: "Markdown" });
+
+    bot.sendMessage(chatId, helpText, { parse_mode: "HTML" });
   });
 
-  // /EVENTS
+  // EVENTS
   bot.onText(/\/events/, async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from?.id.toString();
@@ -99,9 +94,10 @@ if (shouldPoll) {
 
     try {
       const events = await getEvents(userId);
+
       if (events.length === 0) {
-        return bot.sendMessage(chatId, "📭 *Your schedule is clear!*", {
-          parse_mode: "Markdown",
+        return bot.sendMessage(chatId, "📭 <b>Your schedule is clear!</b>", {
+          parse_mode: "HTML",
         });
       }
 
@@ -111,32 +107,35 @@ if (shouldPoll) {
             dateStyle: "medium",
             timeStyle: "short",
           });
+
           const emoji =
             e.type === "DEADLINE" ? "📌" : e.type === "MEETING" ? "📅" : "✈️";
-          return `${emoji} *${e.title}*\n   📅 ${date}`;
+
+          return `${emoji} <b>${e.title}</b>\n   📅 ${date}`;
         })
         .join("\n\n");
 
-      bot.sendMessage(chatId, `📋 *Your Upcoming Events:*\n\n${list}`, {
-        parse_mode: "Markdown",
+      bot.sendMessage(chatId, `📋 <b>Your Upcoming Events:</b>\n\n${list}`, {
+        parse_mode: "HTML",
       });
-    } catch (e) {
+    } catch {
       bot.sendMessage(chatId, "❌ Failed to fetch events.");
     }
   });
 
-  // /ADD
+  // ADD
   bot.onText(/\/add (.+)/, async (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from?.id.toString();
     if (!userId || !match) return;
 
     const parts = match[1].split("|").map((p) => p.trim());
+
     if (parts.length < 3) {
       return bot.sendMessage(
         chatId,
-        "❌ *Format Error!*\nUse: TYPE | Title | YYYY-MM-DD HH:MM",
-        { parse_mode: "Markdown" },
+        "❌ <b>Format Error!</b>\nUse: TYPE | Title | YYYY-MM-DD HH:MM",
+        { parse_mode: "HTML" },
       );
     }
 
@@ -146,8 +145,8 @@ if (shouldPoll) {
     if (isNaN(startTime.getTime())) {
       return bot.sendMessage(
         chatId,
-        "❌ *Invalid Date!* Use YYYY-MM-DD HH:MM",
-        { parse_mode: "Markdown" },
+        "❌ <b>Invalid Date!</b> Use YYYY-MM-DD HH:MM",
+        { parse_mode: "HTML" },
       );
     }
 
@@ -163,12 +162,13 @@ if (shouldPoll) {
         dateStyle: "medium",
         timeStyle: "short",
       });
+
       bot.sendMessage(
         chatId,
-        `✅ *Event Scheduled!*\n\n📍 *Title:* ${title}\n🕒 *Time:* ${successDate}`,
-        { parse_mode: "Markdown" },
+        `✅ <b>Event Scheduled!</b>\n\n📍 <b>Title:</b> ${title}\n🕒 <b>Time:</b> ${successDate}`,
+        { parse_mode: "HTML" },
       );
-    } catch (error) {
+    } catch {
       bot.sendMessage(chatId, "❌ Database error: Failed to save event.");
     }
   });
