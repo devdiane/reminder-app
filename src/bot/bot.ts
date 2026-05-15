@@ -1,9 +1,20 @@
 import "dotenv/config";
+import http from "http"; // 1. Import http
 import TelegramBot from "node-telegram-bot-api";
 import { prisma } from "../lib/prisma";
 import { createEvent, getEvents } from "../services/event.service";
 
 const token = process.env.TELEGRAM_BOT_TOKEN!;
+
+const port = process.env.PORT || 10000;
+http
+  .createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("Bot is running");
+  })
+  .listen(port, () => {
+    console.log(`🚀 Health check server listening on port ${port}`);
+  });
 
 const bot = new TelegramBot(token, { polling: true });
 
