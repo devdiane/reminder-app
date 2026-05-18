@@ -43,6 +43,8 @@ if (shouldPoll) {
     const guideText = `
 👋 <b>Welcome to Reminder Bot!</b>
 
+🆔 <b>Your Chat ID:</b> <code>${chatId}</code>
+
 📋 <b>Available Commands:</b>
 /start - Connect your account
 /add - Create a new reminder
