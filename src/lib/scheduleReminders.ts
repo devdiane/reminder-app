@@ -53,11 +53,12 @@ export async function scheduleReminders(data: EventPayload) {
       type: job.type,
       runAt: job.runAt,
       payload: {
-        eventId: data.id, // Crucial for your deleteEvent logic
+        id: data.id, // Event ID for reference
+        eventId: data.id, // Crucial for deleteEvent logic
         title: data.title,
         type: data.type,
         startTime: data.startTime,
-        userId: data.userId,
+        userId: data.userId, // ✅ Required for sending Telegram messages
       },
     })),
   });

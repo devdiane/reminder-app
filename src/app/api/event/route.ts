@@ -39,20 +39,26 @@ export async function DELETE(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const eventId = searchParams.get("id");
+    const userId = searchParams.get("userId");
 
     if (!eventId) {
       return NextResponse.json({ error: "Event ID required" }, { status: 400 });
     }
 
-    await deleteEvent(eventId);
+    if (!userId) {
+      return NextResponse.json({ error: "User ID required" }, { status: 400 });
+    }
+
+    await deleteEvent(eventId, userId);
 
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error(error);
 
-    return NextResponse.json(
-      { error: "Failed to delete event" },
-      { status: 500 },
-    );
+    const message =
+      error instanceof Error ? error.message : "Failed to delete event";
+    const status = message.includes("unauthorized") ? 403 : 500;
+
+    return NextResponse.json({ error: message }, { status });
   }
 }

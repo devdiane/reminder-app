@@ -32,8 +32,21 @@ export async function createEvent(input: EventInput) {
 
 /**
  * Deletes an event and cleans up all associated jobs in the queue.
+ * Only allows deletion if the event belongs to the specified user.
  */
-export async function deleteEvent(eventId: string) {
+export async function deleteEvent(eventId: string, userId: string) {
+  // First, verify that the event belongs to the user
+  const event = await prisma.event.findFirst({
+    where: {
+      id: eventId,
+      userId: userId,
+    },
+  });
+
+  if (!event) {
+    throw new Error("Event not found or unauthorized");
+  }
+
   // Delete associated jobs using the eventId stored in the JSON payload
   await prisma.job.deleteMany({
     where: {
