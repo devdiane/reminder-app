@@ -1,5 +1,6 @@
 "use client";
 
+import { formatDate, formatTime } from "@/lib/date-utils";
 import { getUserId, getUserName, setUserId as saveUserId } from "@/lib/user";
 import { useEffect, useState } from "react";
 
@@ -196,7 +197,7 @@ export default function HomePage() {
   // Group events by date for calendar view
   const eventsByDate = events.reduce(
     (acc, event) => {
-      const dateKey = new Date(event.startTime).toLocaleDateString();
+      const dateKey = formatDate(event.startTime);
       if (!acc[dateKey]) acc[dateKey] = [];
       acc[dateKey].push(event);
       return acc;
@@ -466,13 +467,10 @@ export default function HomePage() {
 
                       <div className="text-right">
                         <div className="text-sm text-indigo-200">
-                          {new Date(event.startTime).toLocaleDateString()}
+                          {formatDate(event.startTime)}
                         </div>
                         <div className="text-xs text-indigo-400">
-                          {new Date(event.startTime).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
+                          {formatTime(event.startTime)}
                         </div>
                       </div>
                     </div>
@@ -510,13 +508,7 @@ export default function HomePage() {
                           </div>
                           <div className="flex items-center gap-3">
                             <span className="text-indigo-300 text-xs">
-                              {new Date(event.startTime).toLocaleTimeString(
-                                [],
-                                {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                },
-                              )}
+                              {formatTime(event.startTime)}
                             </span>
                             <button
                               onClick={() => handleDelete(event.id)}

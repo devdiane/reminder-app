@@ -1,6 +1,7 @@
 import "dotenv/config";
 import http from "http";
 import TelegramBot from "node-telegram-bot-api";
+import { formatDateTime } from "../lib/date-utils";
 import { prisma } from "../lib/prisma";
 import { createEvent, getEvents } from "../services/event.service";
 
@@ -105,10 +106,7 @@ if (shouldPoll) {
 
       const list = events
         .map((e) => {
-          const date = new Date(e.startTime).toLocaleString("en-PH", {
-            dateStyle: "medium",
-            timeStyle: "short",
-          });
+          const date = formatDateTime(e.startTime);
 
           const emoji =
             e.type === "DEADLINE" ? "📌" : e.type === "MEETING" ? "📅" : "✈️";
@@ -160,10 +158,7 @@ if (shouldPoll) {
         userId,
       });
 
-      const successDate = startTime.toLocaleString("en-PH", {
-        dateStyle: "medium",
-        timeStyle: "short",
-      });
+      const successDate = formatDateTime(startTime);
 
       bot.sendMessage(
         chatId,
